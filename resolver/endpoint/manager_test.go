@@ -243,6 +243,52 @@ func TestManager_Test_ContextDeadlineOnLockWait(t *testing.T) {
 	}
 }
 
+func TestManager_Test_ProbeTimeoutResetPerEndpoint(t *testing.T) {
+	prevProbeTimeout := endpointProbeTimeout
+	endpointProbeTimeout = 40 * time.Millisecond
+	t.Cleanup(func() {
+		endpointProbeTimeout = prevProbeTimeout
+	})
+
+	m := Manager{
+		Providers: []Provider{
+			StaticProvider([]Endpoint{
+				&DOHEndpoint{Hostname: "a"},
+				&DOHEndpoint{Hostname: "b"},
+			}),
+		},
+		EndpointTester: func(e Endpoint) Tester {
+			name := e.(*DOHEndpoint).Hostname
+			return func(ctx context.Context, testDomain string) error {
+				_ = testDomain
+				deadline, ok := ctx.Deadline()
+				if !ok {
+					return errors.New("probe context missing deadline")
+				}
+				switch name {
+				case "a":
+					<-ctx.Done()
+					return ctx.Err()
+				case "b":
+					if remaining := time.Until(deadline); remaining < endpointProbeTimeout/2 {
+						return fmt.Errorf("probe deadline too short: %v", remaining)
+					}
+					return nil
+				default:
+					return fmt.Errorf("unexpected endpoint %q", name)
+				}
+			}
+		},
+	}
+
+	if err := m.Test(context.Background()); err != nil {
+		t.Fatalf("Test() err = %v", err)
+	}
+	if got := m.activeEndpoint.Endpoint.String(); got != "https://b" {
+		t.Fatalf("active endpoint = %s, want https://b", got)
+	}
+}
+
 func TestActiveEndpoint_Test_ClearsTestingWhenManagerBlocked(t *testing.T) {
 	m := newTestManager(t)
 	m.BackgroundTestTimeout = 20 * time.Millisecond

@@ -29,6 +29,8 @@ const (
 	DefaultBackgroundTestTimeout = 30 * time.Second
 )
 
+var endpointProbeTimeout = 5 * time.Second
+
 type Manager struct {
 	// Providers is a list of Endpoint providers listed in order of preference.
 	// The first working provided is selected on each call to Test or internal
@@ -176,8 +178,6 @@ func (m *Manager) findBestEndpointLocked(ctx context.Context) (*activeEnpoint, e
 				firstEndpoint = e
 			}
 			ae := m.newActiveEndpointLocked(e)
-			ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-			defer cancel()
 			var tester func(ctx context.Context, testDomain string) error
 			if m.EndpointTester != nil {
 				if t := m.EndpointTester(e); t != nil {
@@ -187,7 +187,10 @@ func (m *Manager) findBestEndpointLocked(ctx context.Context) (*activeEnpoint, e
 			if tester == nil {
 				tester = endpointTester(e)
 			}
-			if err = tester(ctx, TestDomain); err != nil {
+			probeCtx, cancel := context.WithTimeout(ctx, endpointProbeTimeout)
+			err = tester(probeCtx, TestDomain)
+			cancel()
+			if err != nil {
 				m.debugf("Endpoint err %s", err)
 				if isErrNetUnreachable(err) {
 					// Do not report network unreachable errors, bubble them up.
