@@ -20,6 +20,8 @@ const maxTCPSize = 65535
 
 type tcpBuf [maxTCPSize]byte
 
+var tcpClientReadTimeout = 10 * time.Second
+
 func (p Proxy) serveTCP(l net.Listener, inflightRequests chan struct{}) error {
 	bpool := &sync.Pool{
 		New: func() any {
@@ -55,10 +57,14 @@ func (p Proxy) serveTCPConn(c net.Conn, inflightRequests chan struct{}, bpool *s
 	remotePort := addrPort(remoteAddr)
 
 	for {
+		if tcpClientReadTimeout > 0 {
+			_ = c.SetReadDeadline(time.Now().Add(tcpClientReadTimeout))
+		}
 		inflightRequests <- struct{}{}
 		bp := bpool.Get().(*tcpBuf)
 		buf := bp[:]
 		qsize, err := readTCP(c, buf)
+		_ = c.SetReadDeadline(time.Time{})
 		if err != nil {
 			bpool.Put(bp)
 			<-inflightRequests
