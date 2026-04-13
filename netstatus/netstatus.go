@@ -25,6 +25,7 @@ var handlers struct {
 }
 
 var cancel context.CancelFunc
+var stateMu sync.Mutex
 var prevInterfaces []net.Interface
 
 // Notify sends a Change to c any time the network interfaces status change.
@@ -32,7 +33,9 @@ func Notify(c chan<- Change) {
 	handlers.Lock()
 	defer handlers.Unlock()
 	if handlers.c == nil {
-		go startChecker()
+		ctx, stop := context.WithCancel(context.Background())
+		cancel = stop
+		go startChecker(ctx)
 	}
 	handlers.c = append(handlers.c, c)
 }
@@ -70,12 +73,9 @@ func broadcast(c Change) {
 	}
 }
 
-func startChecker() {
+func startChecker(ctx context.Context) {
 	tick := time.NewTicker(10 * time.Second)
 	defer tick.Stop()
-	var ctx context.Context
-	ctx, cancel = context.WithCancel(context.Background())
-	defer cancel()
 	_, _ = changed() // init
 	for {
 		select {
@@ -90,6 +90,9 @@ func startChecker() {
 }
 
 func changed() (Change, error) {
+	stateMu.Lock()
+	defer stateMu.Unlock()
+
 	newInterfaces, err := net.Interfaces()
 	if err != nil {
 		return "", err

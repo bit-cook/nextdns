@@ -2,6 +2,7 @@ package netstatus
 
 import (
 	"net"
+	"runtime"
 	"testing"
 )
 
@@ -121,5 +122,19 @@ func Test_diffAddrs(t *testing.T) {
 				t.Errorf("diffAddrs() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestNotifyStopConcurrent(t *testing.T) {
+	handlers.Lock()
+	handlers.c = nil
+	cancel = nil
+	handlers.Unlock()
+
+	for i := 0; i < 128; i++ {
+		c := make(chan Change, 1)
+		Notify(c)
+		runtime.Gosched()
+		Stop(c)
 	}
 }
